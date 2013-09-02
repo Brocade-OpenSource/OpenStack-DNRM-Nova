@@ -116,18 +116,27 @@ class API(base.Base):
         """
         neutron = neutronv2.get_client(context)
 
-        # If user has specified to attach instance only to specific
-        # networks, add them to **search_opts
-        # (1) Retrieve non-public network list owned by the tenant.
-        search_opts = {"tenant_id": project_id, 'shared': False}
-        if net_ids:
-            search_opts['id'] = net_ids
-        nets = neutron.list_networks(**search_opts).get('networks', [])
-        # (2) Retrieve public network list.
-        search_opts = {'shared': True}
-        if net_ids:
-            search_opts['id'] = net_ids
-        nets += neutron.list_networks(**search_opts).get('networks', [])
+        if context.is_admin:
+            # To allow admin to connect port from one tenant to instance in
+            # another tenant, this function should return networks without
+            # filtering over tenant_id.
+            search_opts = {}
+            if net_ids:
+                search_opts['id'] = net_ids
+            nets = neutron.list_networks(**search_opts).get('networks', [])
+        else:
+            # If user has specified to attach instance only to specific
+            # networks, add them to **search_opts
+            # (1) Retrieve non-public network list owned by the tenant.
+            search_opts = {"tenant_id": project_id, 'shared': False}
+            if net_ids:
+                search_opts['id'] = net_ids
+            nets = neutron.list_networks(**search_opts).get('networks', [])
+            # (2) Retrieve public network list.
+            search_opts = {'shared': True}
+            if net_ids:
+                search_opts['id'] = net_ids
+            nets += neutron.list_networks(**search_opts).get('networks', [])
 
         _ensure_requested_network_ordering(
             lambda x: x['id'],
@@ -260,6 +269,9 @@ class API(base.Base):
                                self._has_port_binding_extension() else
                                neutronv2.get_client(context, admin=True))
                 if port:
+                    if context.is_admin and \
+                            port['device_owner'].startswith('network:'):
+                        del port_req_body['port']['device_owner']
                     port_client.update_port(port['id'], port_req_body)
                     touched_port_ids.append(port['id'])
                 else:
@@ -819,8 +831,9 @@ class API(base.Base):
         if not self._has_port_binding_extension(refresh_cache=True):
             return
         neutron = neutronv2.get_client(context, admin=True)
-        search_opts = {'device_id': instance['uuid'],
-                       'tenant_id': instance['project_id']}
+        search_opts = {'device_id': instance['uuid']}
+        if not context.is_admin:
+            search_opts['tenant_id'] = instance['project_id']
         data = neutron.list_ports(**search_opts)
         ports = data['ports']
         for p in ports:
@@ -894,8 +907,9 @@ class API(base.Base):
         return network, ovs_interfaceid
 
     def _build_network_info_model(self, context, instance, networks=None):
-        search_opts = {'tenant_id': instance['project_id'],
-                       'device_id': instance['uuid'], }
+        search_opts = {'device_id': instance['uuid']}
+        if not context.is_admin:
+            search_opts['tenant_id'] = instance['project_id']
         client = neutronv2.get_client(context, admin=True)
         data = client.list_ports(**search_opts)
         ports = data.get('ports', [])
