@@ -15,6 +15,7 @@
 #    under the License.
 #
 # vim: tabstop=4 shiftwidth=4 softtabstop=4
+# TODO: fix tests for this file
 
 import time
 
@@ -145,8 +146,8 @@ class API(base.Base):
 
         return nets
 
-    @refresh_cache
-    def allocate_for_instance(self, context, instance, **kwargs):
+    def allocate_for_instance(self, context, instance, conductor_api=None,
+                              **kwargs):
         """Allocate network resources for the instance.
 
         :param requested_networks: optional value containing
@@ -242,6 +243,9 @@ class API(base.Base):
             elif uuid_match:
                 security_group_ids.append(uuid_match)
 
+        # Store cache contents before modifications
+        cache = self._get_instance_nw_info(context, instance)
+
         touched_port_ids = []
         created_port_ids = []
         for network in nets:
@@ -318,6 +322,14 @@ class API(base.Base):
                             LOG.exception(msg, port_id)
 
         nw_info = self._get_instance_nw_info(context, instance, networks=nets)
+
+        # Update cache in database
+        for port in (port for port in nw_info
+                     if port['id'] not in [i['id'] for i in cache]):
+            cache.append(port)
+        update_instance_info_cache(
+            self, context, instance, cache, conductor_api=conductor_api)
+
         # NOTE(danms): Only return info about ports we created in this run.
         # In the initial allocation case, this will be everything we created,
         # and in later runs will only be what was created that time. Thus,
@@ -376,7 +388,6 @@ class API(base.Base):
                 LOG.exception(_("Failed to delete neutron port %(portid)s")
                               % {'portid': port})
 
-    @refresh_cache
     def allocate_port_for_instance(self, context, instance, port_id,
                                    network_id=None, requested_ip=None,
                                    conductor_api=None):
@@ -424,7 +435,6 @@ class API(base.Base):
         nw_info = self._build_network_info_model(context, instance, networks)
         return network_model.NetworkInfo.hydrate(nw_info)
 
-    @refresh_cache
     def add_fixed_ip_to_instance(self, context, instance, network_id,
                                  conductor_api=None):
         """Add a fixed ip to the instance from specified network."""
@@ -460,7 +470,6 @@ class API(base.Base):
         raise exception.NetworkNotFoundForInstance(
                 instance_id=instance['uuid'])
 
-    @refresh_cache
     def remove_fixed_ip_from_instance(self, context, instance, address,
                                       conductor_api=None):
         """Remove a fixed ip from the instance."""
