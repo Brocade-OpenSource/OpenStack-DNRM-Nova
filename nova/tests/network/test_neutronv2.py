@@ -305,6 +305,11 @@ class TestNeutronv2Base(test.TestCase):
             mox_list_network_params['id'] = mox.SameElementsAs(search_ids)
         self.moxed_client.list_networks(
             **mox_list_network_params).AndReturn({'networks': []})
+
+        api._get_instance_nw_info(mox.IgnoreArg(),
+                                  self.instance).AndReturn(
+                                        self._returned_nw_info)
+
         for net_id in expected_network_order:
             port_req_body = {
                 'port': {
@@ -671,6 +676,7 @@ class TestNeutronv2(TestNeutronv2Base):
         In this case, the code should delete the first created port.
         """
         api = neutronapi.API()
+        self.mox.StubOutWithMock(api, '_get_instance_nw_info')
         self.mox.StubOutWithMock(api, '_populate_neutron_extension_values')
         self.mox.StubOutWithMock(api, '_has_port_binding_extension')
         api._has_port_binding_extension().MultipleTimes().AndReturn(False)
@@ -680,6 +686,9 @@ class TestNeutronv2(TestNeutronv2Base):
                 {'networks': self.nets2})
         self.moxed_client.list_networks(shared=True).AndReturn(
                 {'networks': []})
+        api._get_instance_nw_info(mox.IgnoreArg(),
+                                  self.instance).AndReturn(
+                                        self._returned_nw_info)
         index = 0
         for network in self.nets2:
             binding_port_req_body = {
@@ -721,12 +730,16 @@ class TestNeutronv2(TestNeutronv2Base):
         In this case, the code should not delete any ports.
         """
         api = neutronapi.API()
+        self.mox.StubOutWithMock(api, '_get_instance_nw_info')
         self.moxed_client.list_networks(
             tenant_id=self.instance['project_id'],
             shared=False).AndReturn(
                 {'networks': self.nets2})
         self.moxed_client.list_networks(shared=True).AndReturn(
                 {'networks': []})
+        api._get_instance_nw_info(mox.IgnoreArg(),
+                                  self.instance).AndReturn(
+                                        self._returned_nw_info)
         port_req_body = {
             'port': {
                 'network_id': self.nets2[0]['id'],
@@ -1268,7 +1281,6 @@ class TestNeutronv2(TestNeutronv2Base):
 
     def test_add_fixed_ip_to_instance(self):
         api = neutronapi.API()
-        self._setup_mock_for_refresh_cache(api)
         network_id = 'my_netid1'
         search_opts = {'network_id': network_id}
         self.moxed_client.list_subnets(
@@ -1295,7 +1307,6 @@ class TestNeutronv2(TestNeutronv2Base):
 
     def test_remove_fixed_ip_from_instance(self):
         api = neutronapi.API()
-        self._setup_mock_for_refresh_cache(api)
         address = '10.0.0.3'
         zone = 'compute:%s' % self.instance['availability_zone']
         search_opts = {'device_id': self.instance['uuid'],

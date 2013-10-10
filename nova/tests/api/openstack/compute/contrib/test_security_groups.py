@@ -25,6 +25,7 @@ from nova.api.openstack import wsgi
 from nova.api.openstack import xmlutil
 from nova import compute
 from nova.compute import power_state
+from nova.conductor import api as conductor_api
 import nova.db
 from nova import exception
 from nova.objects import instance as instance_obj
@@ -138,6 +139,12 @@ class TestSecurityGroups(test.TestCase):
         """Check that no reservations are leaked during tests."""
         result = quota.QUOTAS.get_project_quotas(context, context.project_id)
         self.assertEqual(result['security_groups']['reserved'], 0)
+
+    def instance_get_by_uuid(context, instance_uuid,
+                             columns_to_join=None):
+        return fake_instance.fake_db_instance(
+            **{'uuid': instance_uuid,
+               'info_cache': {'network_info': 'fake_info'}})
 
     def test_create_security_group(self):
         sg = security_group_template()
@@ -508,6 +515,8 @@ class TestSecurityGroups(test.TestCase):
                        security_group_in_use)
         self.stubs.Set(nova.db, 'security_group_get',
                        return_security_group)
+        self.stubs.Set(conductor_api.LocalAPI, 'instance_get_by_uuid',
+                       self.instance_get_by_uuid)
 
         req = fakes.HTTPRequest.blank('/v2/fake/os-security-groups/1')
         self.assertRaises(webob.exc.HTTPBadRequest, self.controller.delete,

@@ -16,7 +16,7 @@
 #    under the License.
 #
 # @author: Aaron Rosen, Nicira Networks, Inc.
-
+import mox
 import uuid
 
 from lxml import etree
@@ -27,6 +27,7 @@ import webob
 from nova.api.openstack.compute.contrib import security_groups
 from nova.api.openstack import xmlutil
 from nova import compute
+from nova.conductor import api as conductor_api
 from nova import context
 import nova.db
 from nova import exception
@@ -45,6 +46,7 @@ class TestNeutronSecurityGroupsTestCase(test.TestCase):
         cfg.CONF.set_override('security_group_api', 'neutron')
         self.original_client = neutronv2.get_client
         neutronv2.get_client = get_client
+        self._returned_nw_info = []
 
     def tearDown(self):
         neutronv2.get_client = self.original_client
@@ -136,7 +138,7 @@ class TestNeutronSecurityGroups(
             network_id=net['network']['id'], security_groups=[sg['id']],
             device_id=test_security_groups.FAKE_UUID1)
         expected = [{'rules': [], 'tenant_id': 'fake_tenant', 'id': sg['id'],
-                    'name': 'test', 'description': 'test-description'}]
+                     'name': 'test', 'description': 'test-description'}]
         self.stubs.Set(nova.db, 'instance_get_by_uuid',
                        test_security_groups.return_server_by_uuid)
         req = fakes.HTTPRequest.blank('/v2/fake/servers/%s/os-security-groups'
@@ -160,14 +162,28 @@ class TestNeutronSecurityGroups(
         self.controller.delete(req, sg['id'])
 
     def test_delete_security_group_in_use(self):
+
+        self.stubs.Set(conductor_api.LocalAPI, 'instance_get_by_uuid',
+                       self.instance_get_by_uuid)
+
         sg = self._create_sg_template().get('security_group')
-        self._create_network()
+        net = self._create_network()
+        networks = [net['network']]
         fake_instance = {'project_id': 'fake_tenant',
                          'availability_zone': 'zone_one',
                          'security_groups': [],
                          'uuid': str(uuid.uuid4()),
                          'display_name': 'test_instance'}
         neutron = neutron_api.API()
+        self.mox.StubOutWithMock(neutron, '_get_instance_nw_info')
+        neutron._get_instance_nw_info(mox.IgnoreArg(),
+                                      fake_instance).AndReturn(
+                                          self._returned_nw_info)
+        neutron._get_instance_nw_info(mox.IgnoreArg(),
+                                      fake_instance,
+                                      networks=networks).AndReturn(
+                                          self._returned_nw_info)
+        self.mox.ReplayAll()
         neutron.allocate_for_instance(context.get_admin_context(),
                                       fake_instance,
                                       security_groups=[sg['id']])
@@ -329,10 +345,10 @@ class TestNeutronSecurityGroups(
         net = self._create_network()
         self.assertRaises(exception.SecurityGroupCannotBeApplied,
                           self._create_port,
-                           network_id=net['network']['id'],
-                           security_groups=[sg1['id']],
-                           port_security_enabled=False,
-                           device_id=test_security_groups.FAKE_UUID1)
+                          network_id=net['network']['id'],
+                          security_groups=[sg1['id']],
+                          port_security_enabled=False,
+                          device_id=test_security_groups.FAKE_UUID1)
 
 
 class TestNeutronSecurityGroupRulesTestCase(TestNeutronSecurityGroupsTestCase):
@@ -425,7 +441,7 @@ class TestNeutronSecurityGroupsOutputTest(TestNeutronSecurityGroupsTestCase):
         self.stubs.Set(neutron_driver.SecurityGroupAPI,
                        'get_instances_security_groups_bindings',
                        (test_security_groups.
-                       fake_get_instances_security_groups_bindings))
+                        fake_get_instances_security_groups_bindings))
         self.flags(
             osapi_compute_extension=[
                 'nova.api.openstack.compute.contrib.select_extensions'],
@@ -583,7 +599,6 @@ def get_client(context=None, admin=False):
 
 
 class MockClient(object):
-
     # Needs to be global to survive multiple calls to get_client.
     _fake_security_groups = {}
     _fake_ports = {}
@@ -668,7 +683,7 @@ class MockClient(object):
             ret['fixed_ips'] = [{'subnet_id': network['subnets'][0],
                                  'ip_address': '10.0.0.1'}]
         if not ret['security_groups'] and (port_security is None or
-                                           port_security is True):
+                                                   port_security is True):
             for security_group in self._fake_security_groups.values():
                 if security_group['name'] == 'default':
                     ret['security_groups'] = [security_group['id']]
@@ -704,7 +719,7 @@ class MockClient(object):
     def show_security_group_rule(self, security_group_rule, **_params):
         try:
             return {'security_group_rule':
-                    self._fake_security_group_rules[security_group_rule]}
+                        self._fake_security_group_rules[security_group_rule]}
         except KeyError:
             msg = 'Security Group rule %s not found' % security_group_rule
             raise q_exc.NeutronClientException(message=msg, status_code=404)
@@ -712,7 +727,7 @@ class MockClient(object):
     def show_network(self, network, **_params):
         try:
             return {'network':
-                    self._fake_networks[network]}
+                        self._fake_networks[network]}
         except KeyError:
             msg = 'Network %s not found' % network
             raise q_exc.NeutronClientException(message=msg, status_code=404)
@@ -720,7 +735,7 @@ class MockClient(object):
     def show_port(self, port, **_params):
         try:
             return {'port':
-                    self._fake_ports[port]}
+                        self._fake_ports[port]}
         except KeyError:
             msg = 'Port %s not found' % port
             raise q_exc.NeutronClientException(message=msg, status_code=404)
@@ -728,7 +743,7 @@ class MockClient(object):
     def show_subnet(self, subnet, **_params):
         try:
             return {'subnet':
-                    self._fake_subnets[subnet]}
+                        self._fake_subnets[subnet]}
         except KeyError:
             msg = 'Port %s not found' % subnet
             raise q_exc.NeutronClientException(message=msg, status_code=404)
@@ -756,7 +771,7 @@ class MockClient(object):
 
     def list_networks(self, **_params):
         return {'networks':
-                [network for network in self._fake_networks.values()]}
+                    [network for network in self._fake_networks.values()]}
 
     def list_ports(self, **_params):
         ret = []
@@ -771,7 +786,7 @@ class MockClient(object):
 
     def list_subnets(self, **_params):
         return {'subnets':
-                [subnet for subnet in self._fake_subnets.values()]}
+                    [subnet for subnet in self._fake_subnets.values()]}
 
     def list_floatingips(self, **_params):
         return {'floatingips': []}

@@ -15,7 +15,6 @@
 #    under the License.
 #
 # vim: tabstop=4 shiftwidth=4 softtabstop=4
-# TODO: fix tests for this file
 
 import time
 
